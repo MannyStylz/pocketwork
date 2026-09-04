@@ -1,4 +1,4 @@
-name: Build LIGHTFINGERS
+name: Build POCKETWORK
 
 # This runs automatically every time code is pushed to the repository,
 # and can also be triggered manually from the Actions tab on GitHub.
@@ -18,23 +18,23 @@ jobs:
       - name: Configure the project with CMake
         run: cmake -B build -DCMAKE_BUILD_TYPE=Release
 
-      - name: Build LIGHTFINGERS (Release)
+      - name: Build POCKETWORK (Release)
         run: cmake --build build --config Release
 
       - name: Find and package the built VST3
         shell: pwsh
         run: |
-          $vst3 = Get-ChildItem -Path build -Recurse -Filter "LIGHTFINGERS.vst3" -Directory | Select-Object -First 1
+          $vst3 = Get-ChildItem -Path build -Recurse -Filter "POCKETWORK.vst3" -Directory | Select-Object -First 1
           if ($null -eq $vst3) {
-            Write-Error "LIGHTFINGERS.vst3 was not found in the build output."
+            Write-Error "POCKETWORK.vst3 was not found in the build output."
             exit 1
           }
           Write-Host "Found build output at: $($vst3.FullName)"
-          Copy-Item -Recurse -Path $vst3.FullName -Destination "LIGHTFINGERS.vst3"
+          Copy-Item -Recurse -Path $vst3.FullName -Destination "POCKETWORK.vst3"
 
       - name: Upload the built plugin
         uses: actions/upload-artifact@v4
         with:
-          name: LIGHTFINGERS-vst3-windows
-          path: LIGHTFINGERS.vst3
+          name: POCKETWORK-vst3-windows
+          path: POCKETWORK.vst3
           if-no-files-found: error
