@@ -29,6 +29,8 @@ juce_add_plugin(LIGHTFINGERS
     COPY_PLUGIN_AFTER_BUILD FALSE
 )
 
+juce_generate_juce_header(LIGHTFINGERS)
+
 target_sources(LIGHTFINGERS PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp
