@@ -97,3 +97,5 @@ LightFingersAudioProcessor::createEditor()
 {
     return new LightFingersAudioProcessorEditor(*this);
 }
+
+juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new LightFingersAudioProcessor(); }
