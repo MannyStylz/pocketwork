@@ -119,7 +119,25 @@ void LightFingersAudioProcessorEditor::exportMidi()
         [this, chooser](const juce::FileChooser& fc)
         {
             auto file = fc.getResult();
-            if (file != juce::File{})
-                processor.getGrooveEngine().exportMidi(file);
+            if (file == juce::File{})
+                return;
+
+            const bool ok = processor.getGrooveEngine().exportMidi(file);
+
+            // Show a real error instead of failing silently — a 0-byte
+            // file with no explanation is much harder to diagnose than
+            // a message telling you exactly what happened.
+            if (!ok)
+            {
+                juce::AlertWindow::showAsync(
+                    juce::MessageBoxOptions()
+                        .withIconType(juce::MessageBoxIconType::WarningIcon)
+                        .withTitle("Export failed")
+                        .withMessage("LIGHTFINGERS could not write the MIDI "
+                                     "file to:\n" + file.getFullPathName() +
+                                     "\n\nTry a different folder (e.g. your "
+                                     "Desktop) and try again."),
+                    nullptr);
+            }
         });
 }
