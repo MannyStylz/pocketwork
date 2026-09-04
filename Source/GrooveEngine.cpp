@@ -89,17 +89,22 @@ bool GrooveEngine::exportMidi(const juce::File& file, double bpm) const
         tick += static_cast<double>(hit.pocket) *
                 pocketAmount * (ticksPerStep * 0.45);
 
+        // Guard against a negative timestamp (possible on step 0 with
+        // an "early" pocket offset) — a negative time can produce a
+        // corrupt/unreadable MIDI file.
+        tick = juce::jmax(0.0, tick);
+
         int velocity = juce::jlimit(
             1, 127,
             static_cast<int>(std::round(
                 hit.velocity * dynamicsAmount)));
 
         sequence.addEvent(
-            juce::MidiMessage::noteOn(9, hit.note, (juce::uint8) velocity),
+            juce::MidiMessage::noteOn(10, hit.note, (juce::uint8) velocity),
             tick);
 
         sequence.addEvent(
-            juce::MidiMessage::noteOff(9, hit.note),
+            juce::MidiMessage::noteOff(10, hit.note),
             tick + ticksPerStep * 0.45);
     }
 
