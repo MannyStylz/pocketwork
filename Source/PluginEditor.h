@@ -37,6 +37,12 @@ private:
 
     juce::ComboBox exportMap;
 
+    // TEMPORARY DIAGNOSTIC — shows exactly what the host is telling us
+    // about transport/tempo, so we can confirm whether FL Studio is
+    // providing real playhead data to this plugin at all. This will be
+    // removed once the real-time Pocket feature is confirmed working.
+    juce::Label hostInfoLabel;
+
     // NOTE: Grid selector, REC, CLICK, and count-in controls from the
     // spec are intentionally NOT in this build yet. Adding them as
     // inert placeholders would violate the "don't fake it" rule in
