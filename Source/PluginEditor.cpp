@@ -20,9 +20,6 @@ PocketWorkAudioProcessorEditor(PocketWorkAudioProcessor& p)
     addAndMakeVisible(pocket);
     addAndMakeVisible(dynamics);
 
-    // This is the key fix: attaching each slider to its APVTS parameter
-    // means moving the slider now genuinely changes plugin behavior,
-    // supports DAW automation, and stays correct when a preset loads.
     sensitivityAttachment = std::make_unique<SliderAttachment>(
         processor.apvts, ParamIDs::sensitivity, sensitivity);
     pocketAttachment = std::make_unique<SliderAttachment>(
@@ -37,6 +34,10 @@ PocketWorkAudioProcessorEditor(PocketWorkAudioProcessor& p)
     addAndMakeVisible(playMidi);
     addAndMakeVisible(playBoth);
     addAndMakeVisible(exportButton);
+
+    hostInfoLabel.setColour(juce::Label::textColourId, juce::Colours::lime);
+    hostInfoLabel.setFont(juce::Font(12.0f));
+    addAndMakeVisible(hostInfoLabel);
 
     exportButton.onClick = [this] { exportMidi(); };
 
@@ -98,10 +99,37 @@ void PocketWorkAudioProcessorEditor::resized()
 
     exportMap.setBounds(110, 620, 280, 30);
     exportButton.setBounds(850, 615, 205, 38);
+
+    hostInfoLabel.setBounds(20, 675, 1040, 24);
 }
 
 void PocketWorkAudioProcessorEditor::timerCallback()
 {
+    juce::String info = "Host info: ";
+
+    if (auto* playHead = processor.getPlayHead())
+    {
+        if (auto position = playHead->getPosition())
+        {
+            bool isPlaying = position->getIsPlaying();
+            auto ppq = position->getPpqPosition();
+            auto tempo = position->getBpm();
+
+            info << "playing=" << (isPlaying ? "YES" : "no")
+                 << "   ppq=" << (ppq.hasValue() ? juce::String(*ppq, 2) : "unavailable")
+                 << "   bpm=" << (tempo.hasValue() ? juce::String(*tempo, 1) : "unavailable");
+        }
+        else
+        {
+            info << "getPosition() returned nothing (host gave no position info)";
+        }
+    }
+    else
+    {
+        info << "no playhead object at all (getPlayHead() returned null)";
+    }
+
+    hostInfoLabel.setText(info, juce::dontSendNotification);
     repaint();
 }
 
@@ -124,9 +152,6 @@ void PocketWorkAudioProcessorEditor::exportMidi()
 
             const bool ok = processor.getGrooveEngine().exportMidi(file);
 
-            // Show a real error instead of failing silently — a 0-byte
-            // file with no explanation is much harder to diagnose than
-            // a message telling you exactly what happened.
             if (!ok)
             {
                 juce::AlertWindow::showAsync(
