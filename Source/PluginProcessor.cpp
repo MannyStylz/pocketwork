@@ -33,7 +33,15 @@ PocketWorkAudioProcessor::PocketWorkAudioProcessor()
 void PocketWorkAudioProcessor::prepareToPlay(double sampleRate,
                                                int samplesPerBlock)
 {
-    juce::ignoreUnused(sampleRate, samplesPerBlock);
+    juce::ignoreUnused(samplesPerBlock);
+
+    groove.prepare(sampleRate);
+
+    // Tell the host we introduce a small, fixed delay so it can
+    // compensate — this is what makes the swing/pocket technique
+    // honest rather than something that silently throws playback
+    // out of sync with other tracks.
+    setLatencySamples(groove.getLatencySamples());
 }
 
 void PocketWorkAudioProcessor::releaseResources()
@@ -59,16 +67,32 @@ void PocketWorkAudioProcessor::processBlock(
     groove.setPocket(pocketParam->load());
     groove.setDynamics(dynamicsParam->load());
 
-    // HONEST STATUS: live MIDI passthrough only, for now. Pocket and
-    // Dynamics are fully applied when you export a .mid file (see
-    // GrooveEngine::exportMidi), but real-time humanizing of incoming
-    // MIDI as it plays requires tracking host tempo/position (PPQ) to
-    // know where each note falls on the grid — that's a real feature,
-    // not implemented yet, and it will be built in a later milestone
-    // rather than faked here.
+    // Read the host's playback position and tempo, if it's available.
+    // Without this, we can't know where the musical grid actually is
+    // — in that case the engine honestly skips swing rather than
+    // guessing, while Dynamics scaling still applies regardless.
+    bool hostIsPlaying = false;
+    double ppqAtBlockStart = 0.0;
+    double bpm = 120.0;
+
+    if (auto* playHead = getPlayHead())
+    {
+        if (auto position = playHead->getPosition())
+        {
+            hostIsPlaying = position->getIsPlaying();
+
+            if (auto ppq = position->getPpqPosition())
+                ppqAtBlockStart = *ppq;
+
+            if (auto tempo = position->getBpm())
+                bpm = *tempo;
+        }
+    }
+
     juce::MidiBuffer processed;
     groove.processMidi(midi, processed, getSampleRate(),
-                        buffer.getNumSamples());
+                        buffer.getNumSamples(),
+                        hostIsPlaying, ppqAtBlockStart, bpm);
     midi.swapWith(processed);
 }
 
