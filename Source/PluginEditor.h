@@ -1,54 +1,70 @@
 #pragma once
 #include <JuceHeader.h>
-#include "PluginProcessor.h"
+#include "GrooveEngine.h"
 
-class PocketWorkAudioProcessorEditor : public juce::AudioProcessorEditor,
-                                         private juce::Timer
+namespace ParamIDs
+{
+    static const juce::String sensitivity { "sensitivity" };
+    static const juce::String pocket      { "pocket" };
+    static const juce::String dynamics    { "dynamics" };
+}
+
+class PocketWorkAudioProcessor : public juce::AudioProcessor
 {
 public:
-    explicit PocketWorkAudioProcessorEditor(PocketWorkAudioProcessor&);
-    ~PocketWorkAudioProcessorEditor() override = default;
+    PocketWorkAudioProcessor();
+    ~PocketWorkAudioProcessor() override = default;
 
-    void paint(juce::Graphics&) override;
-    void resized() override;
+    void prepareToPlay(double sampleRate, int samplesPerBlock) override;
+    void releaseResources() override;
+
+    bool isBusesLayoutSupported(const BusesLayout&) const override;
+    void processBlock(juce::AudioBuffer<float>&, juce::MidiBuffer&) override;
+
+    juce::AudioProcessorEditor* createEditor() override;
+    bool hasEditor() const override { return true; }
+
+    const juce::String getName() const override { return "POCKETWORK"; }
+    bool acceptsMidi() const override { return true; }
+    bool producesMidi() const override { return true; }
+    bool isMidiEffect() const override { return false; }
+    double getTailLengthSeconds() const override { return 0.0; }
+
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram(int) override {}
+    const juce::String getProgramName(int) override { return {}; }
+    void changeProgramName(int, const juce::String&) override {}
+
+    void getStateInformation(juce::MemoryBlock&) override;
+    void setStateInformation(const void*, int) override;
+
+    GrooveEngine& getGrooveEngine() { return groove; }
+
+    // --- Breakbeat playback (Step 1) --------------------------------
+    bool loadBreakbeatFile(const juce::File& file);
+
+    void setBreakbeatPlaying(bool shouldPlay);
+    bool isBreakbeatLoaded() const { return breakbeatBuffer.getNumSamples() > 0; }
+    juce::String getLoadedBreakbeatName() const { return loadedFileName; }
+
+    juce::AudioProcessorValueTreeState apvts;
 
 private:
-    void timerCallback() override;
-    void exportMidi();
+    static juce::AudioProcessorValueTreeState::ParameterLayout createParameterLayout();
 
-    PocketWorkAudioProcessor& processor;
+    GrooveEngine groove;
 
-    juce::Slider sensitivity;
-    juce::Slider pocket;
-    juce::Slider dynamics;
+    std::atomic<float>* sensitivityParam = nullptr;
+    std::atomic<float>* pocketParam      = nullptr;
+    std::atomic<float>* dynamicsParam    = nullptr;
 
-    // These bind the sliders directly to the plugin's parameters, so
-    // moving a slider updates the real value AND stays in sync if the
-    // value changes from automation or a saved preset. This is what
-    // was missing in v0.1.
-    using SliderAttachment = juce::AudioProcessorValueTreeState::SliderAttachment;
-    std::unique_ptr<SliderAttachment> sensitivityAttachment;
-    std::unique_ptr<SliderAttachment> pocketAttachment;
-    std::unique_ptr<SliderAttachment> dynamicsAttachment;
+    juce::AudioFormatManager formatManager;
+    juce::AudioBuffer<float> breakbeatBuffer;
+    juce::String loadedFileName;
+    double breakbeatSourceSampleRate = 44100.0;
+    std::atomic<int> breakbeatPlayPosition { 0 };
+    std::atomic<bool> breakbeatPlaying { false };
 
-    juce::TextButton playMidi {"\xE2\x99\xAA Play MIDI"};
-    juce::TextButton playBoth {"\xE2\x99\xAB Play Both"};
-    juce::TextButton exportButton {"\xE2\x87\xA9 EXPORT .MID"};
-
-    juce::ComboBox exportMap;
-
-    // TEMPORARY DIAGNOSTIC — shows exactly what the host is telling us
-    // about transport/tempo, so we can confirm whether FL Studio is
-    // providing real playhead data to this plugin at all. This will be
-    // removed once the real-time Pocket feature is confirmed working.
-    juce::Label hostInfoLabel;
-
-    // NOTE: Grid selector, REC, CLICK, and count-in controls from the
-    // spec are intentionally NOT in this build yet. Adding them as
-    // inert placeholders would violate the "don't fake it" rule in
-    // the spec, so they'll arrive in the milestone where they're
-    // actually wired to real behavior.
-
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(
-        PocketWorkAudioProcessorEditor)
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PocketWorkAudioProcessor)
 };
