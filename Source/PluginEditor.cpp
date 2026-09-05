@@ -35,6 +35,22 @@ PocketWorkAudioProcessorEditor(PocketWorkAudioProcessor& p)
     addAndMakeVisible(playBoth);
     addAndMakeVisible(exportButton);
 
+    addAndMakeVisible(loadBreakbeatButton);
+    loadBreakbeatButton.onClick = [this] { loadBreakbeat(); };
+
+    loadedBreakbeatLabel.setColour(juce::Label::textColourId,
+                                   juce::Colours::lightgrey);
+    loadedBreakbeatLabel.setFont(juce::Font(12.0f));
+    loadedBreakbeatLabel.setText("No breakbeat loaded",
+                                 juce::dontSendNotification);
+    addAndMakeVisible(loadedBreakbeatLabel);
+
+    playBoth.setClickingTogglesState(true);
+    playBoth.onClick = [this]
+    {
+        processor.setBreakbeatPlaying(playBoth.getToggleState());
+    };
+
     hostInfoLabel.setColour(juce::Label::textColourId, juce::Colours::lime);
     hostInfoLabel.setFont(juce::Font(12.0f));
     addAndMakeVisible(hostInfoLabel);
@@ -97,6 +113,9 @@ void PocketWorkAudioProcessorEditor::resized()
     playMidi.setBounds(25, 190, 130, 35);
     playBoth.setBounds(165, 190, 130, 35);
 
+    loadBreakbeatButton.setBounds(305, 190, 160, 35);
+    loadedBreakbeatLabel.setBounds(475, 195, 400, 25);
+
     exportMap.setBounds(110, 620, 280, 30);
     exportButton.setBounds(850, 615, 205, 38);
 
@@ -138,6 +157,32 @@ void PocketWorkAudioProcessorEditor::timerCallback()
                           juce::dontSendNotification);
 
     repaint();
+}
+
+void PocketWorkAudioProcessorEditor::loadBreakbeat()
+{
+    auto chooser = std::make_shared<juce::FileChooser>(
+        "Load Breakbeat Audio",
+        juce::File::getSpecialLocation(
+            juce::File::userMusicDirectory),
+        "*.wav;*.aif;*.aiff;*.mp3;*.flac");
+
+    chooser->launchAsync(
+        juce::FileBrowserComponent::openMode |
+        juce::FileBrowserComponent::canSelectFiles,
+        [this, chooser](const juce::FileChooser& fc)
+        {
+            auto file = fc.getResult();
+            if (file == juce::File{})
+                return;
+
+            const bool ok = processor.loadBreakbeatFile(file);
+
+            loadedBreakbeatLabel.setText(
+                ok ? ("Loaded: " + processor.getLoadedBreakbeatName())
+                   : "Failed to load that file",
+                juce::dontSendNotification);
+        });
 }
 
 void PocketWorkAudioProcessorEditor::exportMidi()
