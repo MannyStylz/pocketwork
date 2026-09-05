@@ -129,7 +129,14 @@ void PocketWorkAudioProcessorEditor::timerCallback()
         info << "no playhead object at all (getPlayHead() returned null)";
     }
 
-    hostInfoLabel.setText(info, juce::dontSendNotification);
+    int lastDelayMs = processor.getGrooveEngine().getLastNoteOnDelayMs();
+    juce::String delayInfo = (lastDelayMs < 0)
+        ? "Last note-on delay: none processed yet"
+        : "Last note-on delay: " + juce::String(lastDelayMs) + " ms";
+
+    hostInfoLabel.setText(info + "     |     " + delayInfo,
+                          juce::dontSendNotification);
+
     repaint();
 }
 
