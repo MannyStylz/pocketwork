@@ -2,8 +2,6 @@
 #include <JuceHeader.h>
 #include "GrooveEngine.h"
 
-// Parameter ID constants — used by both the processor and the editor
-// so the two never get out of sync with mismatched string names.
 namespace ParamIDs
 {
     static const juce::String sensitivity { "sensitivity" };
@@ -29,7 +27,7 @@ public:
     const juce::String getName() const override { return "POCKETWORK"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return true; }
-    bool isMidiEffect() const override { return true; }
+    bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 0.0; }
 
     int getNumPrograms() override { return 1; }
@@ -38,16 +36,18 @@ public:
     const juce::String getProgramName(int) override { return {}; }
     void changeProgramName(int, const juce::String&) override {}
 
-    // getStateInformation/setStateInformation now save the FULL apvts
-    // state (not just three raw floats), so presets survive properly
-    // and every parameter is DAW-automatable.
     void getStateInformation(juce::MemoryBlock&) override;
     void setStateInformation(const void*, int) override;
 
     GrooveEngine& getGrooveEngine() { return groove; }
 
-    // Exposed so the editor can attach sliders directly to parameters
-    // instead of the editor and engine drifting out of sync.
+    // --- Breakbeat playback (Step 1) --------------------------------
+    bool loadBreakbeatFile(const juce::File& file);
+
+    void setBreakbeatPlaying(bool shouldPlay);
+    bool isBreakbeatLoaded() const { return breakbeatBuffer.getNumSamples() > 0; }
+    juce::String getLoadedBreakbeatName() const { return loadedFileName; }
+
     juce::AudioProcessorValueTreeState apvts;
 
 private:
@@ -55,11 +55,16 @@ private:
 
     GrooveEngine groove;
 
-    // Cached atomic pointers to the live parameter values, read safely
-    // from the audio thread on every processBlock call.
     std::atomic<float>* sensitivityParam = nullptr;
     std::atomic<float>* pocketParam      = nullptr;
     std::atomic<float>* dynamicsParam    = nullptr;
+
+    juce::AudioFormatManager formatManager;
+    juce::AudioBuffer<float> breakbeatBuffer;
+    juce::String loadedFileName;
+    double breakbeatSourceSampleRate = 44100.0;
+    std::atomic<int> breakbeatPlayPosition { 0 };
+    std::atomic<bool> breakbeatPlaying { false };
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR(PocketWorkAudioProcessor)
 };
