@@ -34,8 +34,6 @@ void GrooveEngine::generateDemoGroove()
 {
     hits.clear();
 
-    // Screenshot-defined GM drum defaults:
-    // Kick 36, Snare 38, Closed Hat 42.
     const int kick[]   = {0, 4, 8, 10, 12};
     const int snare[]  = {4, 12};
     const int hats[]   = {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15};
@@ -55,13 +53,12 @@ void GrooveEngine::generateDemoGroove()
 
 void GrooveEngine::prepare(double sampleRate)
 {
-    // 40ms max swing window — enough to create an audible, musical
-    // pocket feel without introducing latency a producer would notice
-    // or find annoying when playing live.
     latencySamples = static_cast<int>(std::round(sampleRate * 0.04));
 
     for (auto& p : pending)
         p.active = false;
+
+    activeNoteDelay.fill(0);
 }
 
 void GrooveEngine::processMidi(const juce::MidiBuffer& input,
@@ -74,7 +71,6 @@ void GrooveEngine::processMidi(const juce::MidiBuffer& input,
 {
     output.clear();
 
-    // 1) Release any held-back (swung) notes whose delay has elapsed.
     for (auto& p : pending)
     {
         if (!p.active)
@@ -95,12 +91,10 @@ void GrooveEngine::processMidi(const juce::MidiBuffer& input,
         (bpm > 0.0) ? (sampleRate * 60.0 / bpm) : 0.0;
     const double stepsPerQuarter = gridSteps / 4.0;
 
-    // 2) Handle this block's incoming events.
     for (const auto metadata : input)
     {
         auto msg = metadata.getMessage();
 
-        // Dynamics applies immediately — no timing info needed.
         if (msg.isNoteOn())
         {
             int scaledVel = juce::jlimit(1, 127,
@@ -113,24 +107,37 @@ void GrooveEngine::processMidi(const juce::MidiBuffer& input,
         }
 
         int delaySamples = 0;
+        const int noteKey = (juce::jlimit(1, 16, msg.getChannel()) - 1) * 128
+                             + juce::jlimit(0, 127, msg.getNoteNumber());
 
-        // Swing/Pocket only applies to note-ons, and only when we
-        // genuinely know where we are in the bar (host playing, valid
-        // tempo). Without that, we honestly pass notes through
-        // untouched rather than guessing at timing.
-        if (hostIsPlaying && samplesPerQuarter > 0.0 && msg.isNoteOn())
+        if (msg.isNoteOn())
         {
-            double eventPpq = ppqAtBlockStart +
-                (static_cast<double>(metadata.samplePosition) /
-                 sampleRate) * (bpm / 60.0);
+            if (hostIsPlaying && samplesPerQuarter > 0.0)
+            {
+                double eventPpq = ppqAtBlockStart +
+                    (static_cast<double>(metadata.samplePosition) /
+                     sampleRate) * (bpm / 60.0);
 
-            double stepPosition = eventPpq * stepsPerQuarter;
-            int stepIndex = static_cast<int>(std::floor(stepPosition + 0.5));
-            bool isOffbeatStep = (stepIndex % 2) != 0;
+                double stepPosition = eventPpq * stepsPerQuarter;
+                int stepIndex = static_cast<int>(std::floor(stepPosition + 0.5));
+                bool isOffbeatStep = (stepIndex % 2) != 0;
 
-            if (isOffbeatStep)
-                delaySamples = static_cast<int>(
-                    std::round(pocketAmount * latencySamples));
+                if (isOffbeatStep)
+                    delaySamples = static_cast<int>(
+                        std::round(pocketAmount * latencySamples));
+            }
+
+            activeNoteDelay[noteKey] = delaySamples;
+
+            lastNoteOnDelayMs.store(
+                static_cast<int>(std::round(
+                    1000.0 * delaySamples /
+                    juce::jmax(1.0, sampleRate))));
+        }
+        else if (msg.isNoteOff())
+        {
+            delaySamples = activeNoteDelay[noteKey];
+            activeNoteDelay[noteKey] = 0;
         }
 
         if (delaySamples <= 0)
@@ -152,9 +159,6 @@ void GrooveEngine::processMidi(const juce::MidiBuffer& input,
             }
         }
 
-        // Extremely unlikely at normal note densities, but if the
-        // pending buffer is ever full, fire immediately rather than
-        // silently dropping a note.
         if (!scheduled)
             output.addEvent(msg, metadata.samplePosition);
     }
@@ -170,19 +174,14 @@ bool GrooveEngine::exportMidi(const juce::File& file, double bpm) const
         if (hit.muted)
             continue;
 
-        // One bar represented as 4 beats / 16 sixteenth-note steps.
         const double ticksPerQuarter = 480.0;
         const double ticksPerStep = ticksPerQuarter / 4.0;
 
         double tick = hit.step * ticksPerStep;
 
-        // Pocket: negative = early, positive = late.
         tick += static_cast<double>(hit.pocket) *
                 pocketAmount * (ticksPerStep * 0.45);
 
-        // Guard against a negative timestamp (possible on step 0 with
-        // an "early" pocket offset) — a negative time can produce a
-        // corrupt/unreadable MIDI file.
         tick = juce::jmax(0.0, tick);
 
         int velocity = juce::jlimit(
