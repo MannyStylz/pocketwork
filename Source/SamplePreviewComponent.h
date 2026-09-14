@@ -471,7 +471,7 @@ public:
         // Pre-select the file this slot was last loaded from, if any,
         // so you don't have to hunt for it again to swap it out.
         if (preselectFile != juce::File{} && preselectFile.existsAsFile())
-            browser.setSelectedFile(preselectFile);
+            browser.setFileName(preselectFile.getFileName());
     }
 
     void resized() override
