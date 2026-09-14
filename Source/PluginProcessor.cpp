@@ -35,7 +35,7 @@ namespace
             return false;
 
         juce::MemoryOutputStream decoded;
-        if (!juce::Base64::convertFromBase64(base64, decoded))
+        if (!juce::Base64::convertFromBase64(decoded, base64))
             return false;
 
         juce::MemoryInputStream mis(decoded.getData(), decoded.getDataSize(), false);
