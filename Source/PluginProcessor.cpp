@@ -59,13 +59,27 @@ namespace
         if (!juce::Base64::convertFromBase64(decoded, base64))
             return false;
 
-        juce::MemoryInputStream mis(decoded.getData(), decoded.getDataSize(), false);
+        // CRITICAL FIX (v2.1): same ownership issue the writer side had
+        // in v2.0 — AudioFormatReader takes OWNERSHIP of the stream
+        // pointer passed to createReaderFor() and deletes it internally
+        // when the reader is destroyed. The previous code passed the
+        // address of a STACK-allocated MemoryInputStream — meaning the
+        // reader eventually tried to delete a non-heap pointer, which is
+        // undefined behavior. This only ran when embedded audio was
+        // decoded back out of a saved project (i.e. on reopen), which is
+        // exactly why it worked fine at save time but crashed on reload,
+        // identically across hosts. Heap-allocated now so ownership
+        // transfer is actually safe.
+        auto* mis = new juce::MemoryInputStream(decoded.getData(), decoded.getDataSize(), false);
         juce::WavAudioFormat wavFormat;
         std::unique_ptr<juce::AudioFormatReader> reader(
-            wavFormat.createReaderFor(&mis, false));
+            wavFormat.createReaderFor(mis, false));
 
         if (reader == nullptr)
+        {
+            delete mis; // createReaderFor failed and never took ownership
             return false;
+        }
 
         outBuffer.setSize((int) reader->numChannels, (int) reader->lengthInSamples);
         reader->read(&outBuffer, 0, (int) reader->lengthInSamples, 0, true, true);
