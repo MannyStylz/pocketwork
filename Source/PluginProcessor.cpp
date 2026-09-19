@@ -232,6 +232,15 @@ bool PocketWorkAudioProcessor::loadBreakbeatFile(const juce::File& file,
     breakbeatPlayPosition.store(0);
     mostRecentLoadedFilePath = file.getFullPathName();
 
+    // FIX: loading a breakbeat changes what needs to be saved, but it
+    // isn't an apvts parameter change, so the host has no other way of
+    // knowing the plugin's state is now dirty. Without this, some hosts
+    // (FL Studio included) may save a stale/earlier state snapshot
+    // instead of freshly querying getStateInformation() — meaning the
+    // load works perfectly all session, but doesn't survive a project
+    // save/reopen. This is the real fix for that.
+    updateHostDisplay();
+
     return true;
 }
 
@@ -297,61 +306,83 @@ void PocketWorkAudioProcessor::setFileForSlot(BrowseSlot slot, const juce::Strin
 void PocketWorkAudioProcessor::getStateInformation(
     juce::MemoryBlock& destData)
 {
+    // FIX: our custom data (folder/file paths and, critically, the
+    // multi-megabyte base64-encoded audio blobs) used to be written as
+    // attributes directly onto the SAME XmlElement that also got fed
+    // straight into apvts.replaceState() on load. That meant every
+    // save/load cycle stuffed megabytes of raw audio data into
+    // AudioProcessorValueTreeState's own internal ValueTree, which it
+    // was never designed to hold — and only became a real problem once
+    // actual audio was being embedded, which is exactly when the VST3
+    // load failures started. Our data now lives in a completely
+    // separate child element, so it can never leak into APVTS's state.
     auto state = apvts.copyState();
-    std::unique_ptr<juce::XmlElement> xml(state.createXml());
-    xml->setAttribute("folderKick", kickFolderPath);
-    xml->setAttribute("folderSnare", snareFolderPath);
-    xml->setAttribute("folderHat", hatFolderPath);
-    xml->setAttribute("folderBreakbeat", breakbeatFolderPath);
-    xml->setAttribute("folderExport", exportFolderPath);
-    xml->setAttribute("fileKick", kickFilePath);
-    xml->setAttribute("fileSnare", snareFilePath);
-    xml->setAttribute("fileHat", hatFilePath);
-    xml->setAttribute("fileBreakbeat", breakbeatFilePath);
-    xml->setAttribute("mostRecentFile", mostRecentLoadedFilePath);
+    std::unique_ptr<juce::XmlElement> paramsXml(state.createXml());
+
+    juce::XmlElement root("POCKETWORK_STATE");
+    root.addChildElement(paramsXml.release());
+
+    auto* dataXml = root.createNewChildElement("PluginData");
+    dataXml->setAttribute("folderKick", kickFolderPath);
+    dataXml->setAttribute("folderSnare", snareFolderPath);
+    dataXml->setAttribute("folderHat", hatFolderPath);
+    dataXml->setAttribute("folderBreakbeat", breakbeatFolderPath);
+    dataXml->setAttribute("folderExport", exportFolderPath);
+    dataXml->setAttribute("fileKick", kickFilePath);
+    dataXml->setAttribute("fileSnare", snareFilePath);
+    dataXml->setAttribute("fileHat", hatFilePath);
+    dataXml->setAttribute("fileBreakbeat", breakbeatFilePath);
+    dataXml->setAttribute("mostRecentFile", mostRecentLoadedFilePath);
 
     // CRITICAL: embed the actual trimmed audio data, not just a path —
     // this is what makes loaded samples survive a state refresh even if
     // the original file has moved, been deleted, or the host reloads
     // plugin state without a full project save.
-    xml->setAttribute("kickAudio", bufferToBase64Wav(kickSample, kickSampleRate));
-    xml->setAttribute("snareAudio", bufferToBase64Wav(snareSample, snareSampleRate));
-    xml->setAttribute("hatAudio", bufferToBase64Wav(hatSample, hatSampleRate));
-    xml->setAttribute("breakbeatAudio", bufferToBase64Wav(breakbeatBuffer, breakbeatSourceSampleRate));
+    dataXml->setAttribute("kickAudio", bufferToBase64Wav(kickSample, kickSampleRate));
+    dataXml->setAttribute("snareAudio", bufferToBase64Wav(snareSample, snareSampleRate));
+    dataXml->setAttribute("hatAudio", bufferToBase64Wav(hatSample, hatSampleRate));
+    dataXml->setAttribute("breakbeatAudio", bufferToBase64Wav(breakbeatBuffer, breakbeatSourceSampleRate));
 
-    copyXmlToBinary(*xml, destData);
+    copyXmlToBinary(root, destData);
 }
 
 void PocketWorkAudioProcessor::setStateInformation(
     const void* data, int sizeInBytes)
 {
-    std::unique_ptr<juce::XmlElement> xmlState(
+    std::unique_ptr<juce::XmlElement> root(
         getXmlFromBinary(data, sizeInBytes));
 
-    if (xmlState != nullptr && xmlState->hasTagName(apvts.state.getType()))
+    if (root == nullptr)
+        return;
+
+    // Restore APVTS parameters from their own child element ONLY — this
+    // is what keeps our custom data from ever being able to leak into
+    // APVTS's internal ValueTree again.
+    if (auto* paramsXml = root->getChildByName(apvts.state.getType().toString()))
+        apvts.replaceState(juce::ValueTree::fromXml(*paramsXml));
+
+    if (auto* dataXml = root->getChildByName("PluginData"))
     {
-        kickFolderPath = xmlState->getStringAttribute("folderKick", kickFolderPath);
-        snareFolderPath = xmlState->getStringAttribute("folderSnare", snareFolderPath);
-        hatFolderPath = xmlState->getStringAttribute("folderHat", hatFolderPath);
-        breakbeatFolderPath = xmlState->getStringAttribute("folderBreakbeat", breakbeatFolderPath);
-        exportFolderPath = xmlState->getStringAttribute("folderExport", exportFolderPath);
-        kickFilePath = xmlState->getStringAttribute("fileKick", kickFilePath);
-        snareFilePath = xmlState->getStringAttribute("fileSnare", snareFilePath);
-        hatFilePath = xmlState->getStringAttribute("fileHat", hatFilePath);
-        breakbeatFilePath = xmlState->getStringAttribute("fileBreakbeat", breakbeatFilePath);
-        mostRecentLoadedFilePath = xmlState->getStringAttribute("mostRecentFile", mostRecentLoadedFilePath);
+        kickFolderPath = dataXml->getStringAttribute("folderKick", kickFolderPath);
+        snareFolderPath = dataXml->getStringAttribute("folderSnare", snareFolderPath);
+        hatFolderPath = dataXml->getStringAttribute("folderHat", hatFolderPath);
+        breakbeatFolderPath = dataXml->getStringAttribute("folderBreakbeat", breakbeatFolderPath);
+        exportFolderPath = dataXml->getStringAttribute("folderExport", exportFolderPath);
+        kickFilePath = dataXml->getStringAttribute("fileKick", kickFilePath);
+        snareFilePath = dataXml->getStringAttribute("fileSnare", snareFilePath);
+        hatFilePath = dataXml->getStringAttribute("fileHat", hatFilePath);
+        breakbeatFilePath = dataXml->getStringAttribute("fileBreakbeat", breakbeatFilePath);
+        mostRecentLoadedFilePath = dataXml->getStringAttribute("mostRecentFile", mostRecentLoadedFilePath);
 
         double restoredRate = 44100.0;
-        if (base64WavToBuffer(xmlState->getStringAttribute("kickAudio"), kickSample, restoredRate) && getSampleRate() > 0.0)
+        if (base64WavToBuffer(dataXml->getStringAttribute("kickAudio"), kickSample, restoredRate) && getSampleRate() > 0.0)
         { resampleBufferIfNeeded(kickSample, restoredRate, getSampleRate()); kickSampleRate = getSampleRate(); }
-        if (base64WavToBuffer(xmlState->getStringAttribute("snareAudio"), snareSample, restoredRate) && getSampleRate() > 0.0)
+        if (base64WavToBuffer(dataXml->getStringAttribute("snareAudio"), snareSample, restoredRate) && getSampleRate() > 0.0)
         { resampleBufferIfNeeded(snareSample, restoredRate, getSampleRate()); snareSampleRate = getSampleRate(); }
-        if (base64WavToBuffer(xmlState->getStringAttribute("hatAudio"), hatSample, restoredRate) && getSampleRate() > 0.0)
+        if (base64WavToBuffer(dataXml->getStringAttribute("hatAudio"), hatSample, restoredRate) && getSampleRate() > 0.0)
         { resampleBufferIfNeeded(hatSample, restoredRate, getSampleRate()); hatSampleRate = getSampleRate(); }
-        if (base64WavToBuffer(xmlState->getStringAttribute("breakbeatAudio"), breakbeatBuffer, restoredRate) && getSampleRate() > 0.0)
+        if (base64WavToBuffer(dataXml->getStringAttribute("breakbeatAudio"), breakbeatBuffer, restoredRate) && getSampleRate() > 0.0)
         { resampleBufferIfNeeded(breakbeatBuffer, restoredRate, getSampleRate()); breakbeatSourceSampleRate = getSampleRate(); }
-
-        apvts.replaceState(juce::ValueTree::fromXml(*xmlState));
     }
 }
 
@@ -365,6 +396,12 @@ bool PocketWorkAudioProcessor::analyzeLoadedBreakbeat()
 
     groove.analyzeAudioForGroove(breakbeatBuffer, breakbeatSourceSampleRate,
                                  bpm, bars);
+
+    // FIX: same reasoning as loadBreakbeatFile — Detect Groove changes
+    // saveable state without touching an apvts parameter, so the host
+    // needs to be told explicitly or it may not persist this on save.
+    updateHostDisplay();
+
     return true;
 }
 
@@ -421,6 +458,12 @@ bool PocketWorkAudioProcessor::loadSampleForClass(
     *nameTarget = file.getFileName();
     mostRecentLoadedFilePath = file.getFullPathName();
 
+    // FIX: same reasoning as loadBreakbeatFile — loading a sample
+    // changes saveable state without touching an apvts parameter, so
+    // the host needs to be told explicitly or it may not persist this
+    // on save.
+    updateHostDisplay();
+
     return true;
 }
 
@@ -441,6 +484,11 @@ void PocketWorkAudioProcessor::clearSample(GrooveEngine::DrumClass drumClass)
             hatFileName.clear();
             break;
     }
+
+    // FIX: clearing a sample also changes saveable state, so the host
+    // needs the same notification (otherwise a cleared slot may not
+    // "stick" through a save either).
+    updateHostDisplay();
 }
 
 juce::String PocketWorkAudioProcessor::getLoadedSampleName(
